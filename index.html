@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Population Density</title>
+    <style>
+      /* Fill initially empty for displaying counties */
+      .counties {
+        fill: none;
+      }
+
+      /* display initially none unless mouseover on state is activated */
+      /* Position absolute so that top and left can be used when placing tooltip box on state */
+      .toolTip {
+        display: none;
+        text-align: center;
+        border: 2px solid black;
+        background-color: lightgrey;
+        position: absolute;
+        opacity: 0.8;
+      }
+
+      .toolTip:hover {
+        opacity: 0.7;
+      }
+
+      h1.title {
+        text-align: center;
+        font-weight: bold;
+        font-family: Arial, Helvetica, sans-serif;
+        color: green;
+      }
+
+      h2 > p {
+        font-size: 1.2rem;
+      }
+
+      button.btn {
+        /* display: block; */
+        margin: 10px;
+        width: 200px;
+        height: 50px;
+        background-color: darkgrey;
+        border-radius: 5px;
+      }
+    </style>
+    <script src="//d3js.org/d3.v4.min.js"></script>
+    <script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+    <script src="//d3js.org/topojson.v1.min.js"></script>
+  </head>
+
+  <body>
+    <h1 class="title">Vermont Population Density</h1>
+    <button class="btn" onclick="showBorders()">Show Border</button>
+    <button class="btn" onclick="removeBorder()">Remove Border</button>
+    <button class="btn" onclick="redColor()">Red States</button>
+    <button class="btn" onclick="blueColor()">Blue States</button>
+    <svg width="1000" height="600"></svg>
+    <h2>
+      <p>Created by - Reza Pasha</p>
+      <p>Instructor - Prof. Lodha</p>
+      <p>Class - CSE163: Data Programming for Visualization: Fall 2022</p>
+    </h2>
+    <h4>
+      Sources:<br />
+      <p>Assistance from Peers: Nihal Ernest</p>
+      <a href="//bl.ocks.org/mbostock/5562380">CA Geomap</a><br />
+    </h4>
+
+    <script>
+      // create svg as html element
+      var svg = d3.select("svg"),
+        width = +svg.attr("width"),
+        height = +svg.attr("height");
+
+      var tooltip = d3.select("body").append("div").attr("class", "toolTip");
+      var x = d3.scaleSqrt().domain([0, 4000]).rangeRound([300, 950]);
+
+      // when showBorders is used the border lines on the state will be white
+      var showBorders = () => {
+        svg
+          .selectAll(".counties")
+          .attr("stroke", "white")
+          .attr("stroke-width", "1.4px");
+      };
+
+      // when removeBorders is used the border lines go away
+      var removeBorder = () =>
+        svg.selectAll(".counties").attr("stroke", "clear");
+
+      var redColor = () => {
+        svg.selectAll("path").attr("fill", (color) => {
+          return redScale(idTable.get(color.id));
+        });
+        svg.selectAll("rect").attr("fill", (color) => {
+          return redScale(color[0]);
+        });
+      };
+
+      var blueColor = () => {
+        svg.selectAll("path").attr("fill", (color) => {
+          return blueScale(idTable.get(color.id));
+        });
+        svg.selectAll("rect").attr("fill", (color) => {
+          return blueScale(color[0]);
+        });
+      };
+
+      // red domain/range
+      var redScale = d3
+        .scaleThreshold()
+        .domain([1, 25, 50, 250, 450, 1000, 2000, 4000])
+        .range(d3.schemeOrRd[9]);
+
+      // blue domain/range
+      var blueScale = d3
+        .scaleThreshold()
+        .domain([1, 25, 50, 100, 250, 500, 800, 1000])
+        .range(d3.schemeBlues[9]);
+
+      var g = svg
+        .append("g")
+        .attr("class", "key")
+        .attr("transform", "translate(0,530)");
+
+      // drawing rectangle for legend based on colors (values should be same for each shade)
+      g.selectAll("rect")
+        .data(
+          redScale.range().map((colorRange) => {
+            colorRange = redScale.invertExtent(colorRange);
+            if (!colorRange[0]) {
+              colorRange[0] = x.domain()[0]; // set min color
+            }
+            if (!colorRange[1]) {
+              colorRange[1] == x.domain()[1]; // set max color
+            }
+            return colorRange; // return entire range
+          })
+        )
+        .enter()
+        .append("rect")
+        .attr("height", 11)
+        .attr("x", (colorSubset) => {
+          var colorRangeRet = x(colorSubset[0]);
+          return colorRangeRet;
+        })
+        .attr("width", (d) => {
+          return x(d[1]) - x(d[0]);
+        })
+        .attr("fill", (d) => {
+          return redScale(d[0]);
+        });
+
+      // Title of color legend
+      // translate is used to get it to far left of rectangle
+      g.append("text")
+        .attr("x", 515)
+        .attr("y", -10)
+        .attr("fill", "Blue")
+        .attr("font-weight", "bold")
+        .attr("transform", "translate(-140, 0)")
+        .text("Population per square mile");
+
+      // ticks on color legend
+      g.call(d3.axisBottom(x).tickSize(10).tickValues(redScale.domain()))
+        .select(".domain")
+        .remove();
+
+      // help with translating projection to center: Nihal Ernest
+      var projection = d3
+        .geoAlbersUsa()
+        .scale(10000)
+        .translate([(-20 * width) / 8.5, 3 * height - 300]);
+
+      // county info will hold a key as the geo_id and the corresponding county name and density as an array value
+      var countyInfo = new Object();
+
+      // using projection for path
+      var projectionPath = d3.geoPath().projection(projection);
+
+      // create empty hash table for ids and their corresponding density
+      var idTable = d3.map();
+
+      // function that initially draws state
+      var ready = (_, data) => {
+        //if (error) throw error;
+        svg
+          .append("g")
+          .attr("class", "counties")
+          .selectAll("path")
+          .data(topojson.feature(data, data.objects.counties).features)
+          .enter()
+          .append("path")
+          .attr("fill", (scale) => redScale(idTable.get(scale.id))) // page will initially load redScale colors when loaded
+          .attr("d", projectionPath)
+          .on("mouseover", (county) => {
+            tooltip
+              .style("top", `${d3.event.pageY}px`)
+              .style("left", `${d3.event.pageX}px`)
+              .html(
+                `County Name - ${
+                  countyInfo[county.id][0]
+                }, Population Density = ${countyInfo[county.id][1]}`
+              )
+              .style("display", "block")
+              .style("padding", "10px");
+          })
+          .on("mouseout", () => tooltip.style("display", "none"));
+      };
+
+      d3.queue()
+        .defer(d3.json, "us-10m.json")
+        .defer(d3.csv, "VT_density.csv", function (d) {
+          idTable.set(d.g_id2, +d.density);
+          var index = d.g_id2;
+          countyInfo[index] = [d.countyName, d.density];
+        })
+        .await(ready);
+    </script>
+  </body>
+</html>
